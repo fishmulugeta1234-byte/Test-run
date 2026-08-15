@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
 Builds a personalized 7-day workout program from the client assessment,
-pulling exercises from data/exercises.py and filtering by equipment,
+pulling exercises from exercises.py and filtering by equipment,
 experience level and reported injuries.
 """
 import random
-from data.exercises import EXERCISES, DAY_PLAN
+from exercises import EXERCISES, DAY_PLAN
 
 LEVEL_RANK = {"beginner": 0, "intermediate": 1, "advanced": 2}
 
@@ -73,17 +73,13 @@ def build_workout_plan(assessment: dict) -> dict:
     days = []
     for title_en, title_am, pattern in DAY_PLAN:
         pool = EXERCISES[pattern]
-        # Equipment + injury safety is a hard filter, applied first and never relaxed.
         safe = [ex for ex in pool if _exercise_allowed(ex, equip_key, injury_terms, dislike_terms)]
         if not safe:
-            # dislikes are a preference, not a safety rule - relax those first
             safe = [ex for ex in pool if _exercise_allowed(ex, equip_key, injury_terms, [])]
         if not safe:
             safe = pool  # last-resort only if equipment itself excludes everything
 
         target_n = 4 if pattern in ("active_recovery", "rest_light_cardio") else 5
-        # Fill with exercises at-or-below experience level first; only reach into
-        # harder exercises if the safe pool is too small to fill the day.
         within_level = [ex for ex in safe if LEVEL_RANK.get(ex["level"], 0) <= level_rank]
         above_level = [ex for ex in safe if ex not in within_level]
         rng.shuffle(within_level)
