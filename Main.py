@@ -8,7 +8,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
-# Render port health check server
+# Render port health check
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -31,7 +31,6 @@ def parse_text_to_dict(text: str) -> dict:
         if not line:
             continue
         
-        # Split line by colon or space
         if ":" in line:
             parts = line.split(":", 1)
         else:
@@ -41,7 +40,6 @@ def parse_text_to_dict(text: str) -> dict:
             key = parts[0].strip().lower().replace(" ", "_")
             val = parts[1].strip()
             
-            # Convert numbers automatically
             if val.isdigit():
                 val = int(val)
             else:
@@ -50,7 +48,6 @@ def parse_text_to_dict(text: str) -> dict:
                 except ValueError:
                     pass
             
-            # Convert comma-separated lists
             if isinstance(val, str) and "," in val:
                 val = [item.strip() for item in val.split(",")]
 
@@ -64,7 +61,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "name: Alex\n"
         "weight: 70\n"
         "height: 175\n"
-        "goal: hypertrophy"
+        "fitness_goal: hypertrophy"
     )
 
 async def handle_pasted_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -79,17 +76,17 @@ async def handle_pasted_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("⏳ Assessment received! Building PDF plan...")
 
     temp_json = f"temp_{user_id}.json"
-    output_dir = os.path.join("blueprint_bot", "outputs")
+    output_dir = "outputs"
     os.makedirs(output_dir, exist_ok=True)
     output_pdf = os.path.join(output_dir, f"{user_id}_plan.pdf")
 
     try:
-        # Write parsed dictionary into temp JSON file for generate.py
         with open(temp_json, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
 
+        # Runs generate.py directly from the root folder
         subprocess.run(
-            [sys.executable, os.path.join("blueprint_bot", "generate.py"), temp_json, output_pdf],
+            [sys.executable, "generate.py", temp_json, output_pdf],
             check=True
         )
 
