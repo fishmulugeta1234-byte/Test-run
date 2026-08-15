@@ -1,3 +1,4 @@
-reportlab==4.0.4
-pandas==2.0.3
-openpyxl==3.1.2
+
+reportlab
+pandas
+openpyxl
