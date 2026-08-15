@@ -1,3 +1,19 @@
+import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+class HealthCheck(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is active!")
+
+def start_health_check():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), HealthCheck)
+    server.serve_forever()
+
+threading.Thread(target=start_health_check, daemon=True).start()
 import pandas as pd
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfbase import pdfmetrics
