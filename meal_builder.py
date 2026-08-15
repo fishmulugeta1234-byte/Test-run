@@ -2,9 +2,9 @@
 """
 Builds a 7-day, 4-meal Ethiopian-forward meal matrix scaled to hit each
 client's calorie/protein targets. Uses fixed-ratio meal templates from
-data/foods.py and scales grams per meal to match target calories.
+foods.py and scales grams per meal to match target calories.
 """
-from data.foods import FOODS, MEAL_TEMPLATES, DIET_EXCLUDES
+from foods import FOODS, MEAL_TEMPLATES, DIET_EXCLUDES
 
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 DAYS_AM = ["ሰኞ", "ማክሰኞ", "ረቡዕ", "ሐሙስ", "አርብ", "ቅዳሜ", "እሁድ"]
@@ -13,8 +13,6 @@ DAYS_AM = ["ሰኞ", "ማክሰኞ", "ረቡዕ", "ሐሙስ", "አርብ", "ቅ
 MEAL_SPLIT = {"breakfast": 0.27, "lunch": 0.33, "dinner": 0.30, "snack": 0.10}
 
 # Distinct fixed offsets per meal slot so each slot's rotation is out of phase
-# with the others, even when a restricted pool shrinks to just 1-3 items
-# (a plain multiplier like i*3 gets nullified by modulo on small pools - avoid that).
 _MEAL_OFFSET = {"breakfast": 0, "lunch": 2, "dinner": 5, "snack": 7}
 
 
@@ -84,11 +82,9 @@ def build_meal_plan(assessment: dict, targets: dict) -> dict:
         for meal_key in ["breakfast", "lunch", "dinner", "snack"]:
             pool = [t for t in MEAL_TEMPLATES[meal_key] if _restriction_ok(t, restriction_tags, dislike_terms)]
             if not pool:
-                # dislikes are a preference, not a hard rule - relax those first
                 pool = [t for t in MEAL_TEMPLATES[meal_key] if _restriction_ok(t, restriction_tags, [])]
             if not pool:
                 pool = MEAL_TEMPLATES[meal_key]
-            # Deterministic per-client, per-meal-slot rotation through the pool.
             template = pool[(i + _MEAL_OFFSET[meal_key]) % len(pool)]
             target_kcal = daily_kcal * MEAL_SPLIT[meal_key]
             items, kcal, protein = _scale_meal(template, target_kcal)
