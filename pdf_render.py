@@ -29,10 +29,6 @@ GREY_TEXT = colors.HexColor("#555555")
 
 _FONTS_REGISTERED = False
 
-# Noto Sans Ethiopic only contains Ethiopic-script glyphs (no Latin letters
-# or ASCII digits), so any string mixing English/numbers with Amharic must
-# have the Ethiopic runs wrapped in a separate <font> tag or they render as
-# tofu boxes. This regex finds contiguous Ethiopic-script runs.
 _ETHIOPIC_RE = re.compile(r"[\u1200-\u139F\u2D80-\u2DDF\uAB00-\uAB2F]+")
 
 
@@ -45,7 +41,6 @@ def mixed_font(text: str, bold: bool = False) -> str:
     Returns ReportLab mini-markup where Ethiopic-script substrings are
     wrapped in the NotoEthiopic font and everything else (Latin letters,
     digits, punctuation) is left for the surrounding paragraph's base font.
-    Safe to call on pure-English, pure-Amharic, or mixed strings.
     """
     font_name = "NotoEthiopic-Bold" if bold else "NotoEthiopic"
     text = str(text)
