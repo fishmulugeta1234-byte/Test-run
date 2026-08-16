@@ -1,9 +1,7 @@
 import os
 import re
 import logging
-import asyncio
 from pathlib import Path
-from datetime import datetime
 
 from docxtpl import DocxTemplate
 from openpyxl import load_workbook
@@ -23,19 +21,24 @@ from telegram.ext import (
 
 BASE_DIR = Path(__file__).resolve().parent
 
+# EXACT FILENAMES FROM YOUR GITHUB REPOSITORY
 WORKOUT_TEMPLATE = BASE_DIR / "Simon_30Day_Workout_Blueprint_Updated.docx"
-NUTRITION_TEMPLATE = BASE_DIR / "Simon_30Day_Nutrition_Blueprint.docx"
+
+NUTRITION_TEMPLATE = BASE_DIR / "Simon_30Day_Nutrition_Blueprint-1.docx"
+
 CALCULATOR_FILE = BASE_DIR / "Simon_Calorie_Macro_Calculator.xlsx"
 
+# Folder for temporary generated documents
 OUTPUT_DIR = BASE_DIR / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
+# Telegram token from Render Environment Variables
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
 if not BOT_TOKEN:
     raise RuntimeError(
-        "TELEGRAM_BOT_TOKEN is not set. "
-        "Add it to your Render Environment Variables."
+        "TELEGRAM_BOT_TOKEN is missing. "
+        "Add TELEGRAM_BOT_TOKEN in Render Environment Variables."
     )
 
 
@@ -52,11 +55,10 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================
-# TEMPLATE CHECK
+# CHECK REQUIRED FILES
 # ============================================================
 
 def check_required_files():
-    missing = []
 
     required_files = [
         WORKOUT_TEMPLATE,
@@ -64,13 +66,18 @@ def check_required_files():
         CALCULATOR_FILE,
     ]
 
+    missing = []
+
     for file in required_files:
+
         if not file.exists():
-            missing.append(str(file.name))
+            missing.append(file.name)
 
     if missing:
+
         raise FileNotFoundError(
-            "Missing required files:\n" + "\n".join(missing)
+            "Missing required files:\n"
+            + "\n".join(missing)
         )
 
 
@@ -79,9 +86,6 @@ def check_required_files():
 # ============================================================
 
 def safe_filename(name):
-    """
-    Converts client name into a safe filename.
-    """
 
     name = str(name).strip()
 
@@ -97,43 +101,34 @@ def safe_filename(name):
         name
     )
 
-    return name or "Client"
+    if not name:
+        name = "Client"
 
-
-def clean_value(value, default=""):
-    if value is None:
-        return default
-
-    return str(value).strip()
+    return name
 
 
 def parse_number(value, field_name):
-    """
-    Convert text to float and provide a useful error.
-    """
 
     try:
-        return float(str(value).replace(",", "").strip())
+
+        return float(
+            str(value)
+            .replace(",", "")
+            .strip()
+        )
+
     except Exception:
+
         raise ValueError(
             f"{field_name} must be a number."
         )
 
 
 # ============================================================
-# MACRO CALCULATION
+# CALCULATE NUTRITION
 # ============================================================
 
 def calculate_macros(client_data):
-    """
-    Calculates calories and macros.
-
-    The nutrition template states that targets are based on:
-    Mifflin-St Jeor BMR x activity multiplier,
-    followed by a goal adjustment.
-
-    This function implements that method.
-    """
 
     weight = parse_number(
         client_data["weight"],
@@ -152,35 +147,74 @@ def calculate_macros(client_data):
 
     gender = client_data["gender"].lower().strip()
 
-    activity = client_data["activity_level"].lower().strip()
+    activity = (
+        client_data["activity_level"]
+        .lower()
+        .strip()
+    )
 
-    goal = client_data["goal"].lower().strip()
+    goal = (
+        client_data["goal"]
+        .lower()
+        .strip()
+    )
 
     # --------------------------------------------------------
     # Mifflin-St Jeor
     # --------------------------------------------------------
 
-    if gender in ["male", "m", "man"]:
-        bmr = (10 * weight) + (6.25 * height) - (5 * age) + 5
+    if gender in [
+        "male",
+        "m",
+        "man"
+    ]:
 
-    elif gender in ["female", "f", "woman"]:
-        bmr = (10 * weight) + (6.25 * height) - (5 * age) - 161
+        bmr = (
+            (10 * weight)
+            + (6.25 * height)
+            - (5 * age)
+            + 5
+        )
+
+    elif gender in [
+        "female",
+        "f",
+        "woman"
+    ]:
+
+        bmr = (
+            (10 * weight)
+            + (6.25 * height)
+            - (5 * age)
+            - 161
+        )
 
     else:
-        # Neutral fallback if gender wasn't recognized.
-        bmr = (10 * weight) + (6.25 * height) - (5 * age)
+
+        bmr = (
+            (10 * weight)
+            + (6.25 * height)
+            - (5 * age)
+        )
 
     # --------------------------------------------------------
-    # Activity multiplier
+    # ACTIVITY MULTIPLIERS
     # --------------------------------------------------------
 
     activity_multipliers = {
+
         "sedentary": 1.20,
-        "lightly active": 1.375,
+
         "light": 1.375,
+
+        "lightly active": 1.375,
+
         "moderate": 1.55,
+
         "moderately active": 1.55,
+
         "very active": 1.725,
+
         "extremely active": 1.90,
     }
 
@@ -189,52 +223,67 @@ def calculate_macros(client_data):
         1.55
     )
 
-    maintenance_calories = bmr * activity_multiplier
-
     # --------------------------------------------------------
-    # Goal adjustment
+    # MAINTENANCE CALORIES
     # --------------------------------------------------------
 
-    if "fat" in goal and "loss" in goal:
+    maintenance_calories = (
+        bmr * activity_multiplier
+    )
+
+    # --------------------------------------------------------
+    # GOAL ADJUSTMENT
+    # --------------------------------------------------------
+
+    if (
+        "fat loss" in goal
+        or "weight loss" in goal
+        or "lose" in goal
+    ):
+
         calories = maintenance_calories * 0.85
 
-    elif "lose" in goal or "weight loss" in goal:
-        calories = maintenance_calories * 0.85
+    elif (
+        "muscle gain" in goal
+        or "gain" in goal
+    ):
 
-    elif "muscle" in goal and "gain" in goal:
-        calories = maintenance_calories * 1.10
-
-    elif "gain" in goal:
         calories = maintenance_calories * 1.10
 
     else:
+
         calories = maintenance_calories
 
     calories = round(calories)
 
     # --------------------------------------------------------
-    # Protein
+    # PROTEIN
     # --------------------------------------------------------
 
-    protein = round(weight * 2.0)
+    protein = round(
+        weight * 2.0
+    )
 
     # --------------------------------------------------------
-    # Fat
+    # FAT
     # --------------------------------------------------------
 
-    fats = round(weight * 0.9)
+    fats = round(
+        weight * 0.9
+    )
 
     # --------------------------------------------------------
-    # Carbohydrates
+    # CARBOHYDRATES
     # --------------------------------------------------------
 
-    calories_from_protein = protein * 4
-    calories_from_fat = fats * 9
+    protein_calories = protein * 4
+
+    fat_calories = fats * 9
 
     remaining_calories = (
         calories
-        - calories_from_protein
-        - calories_from_fat
+        - protein_calories
+        - fat_calories
     )
 
     carbs = round(
@@ -242,131 +291,166 @@ def calculate_macros(client_data):
     )
 
     # --------------------------------------------------------
-    # Water
+    # WATER
     # --------------------------------------------------------
 
-    water = round(weight * 0.035, 1)
+    water = round(
+        weight * 0.035,
+        1
+    )
 
     # --------------------------------------------------------
-    # Weekly calories
+    # WEEKLY CALORIES
     # --------------------------------------------------------
 
-    weekly_calories = calories * 7
+    weekly_calories = (
+        calories * 7
+    )
 
     return {
+
         "calories": calories,
+
         "protein": protein,
-        "fats": fats,
+
         "carbs": carbs,
+
+        "fats": fats,
+
         "water": water,
+
         "weekly_calories": weekly_calories,
 
-        # Additional values available to the template
         "bmr": round(bmr),
-        "maintenance_calories": round(maintenance_calories),
+
+        "maintenance_calories": round(
+            maintenance_calories
+        ),
+
         "activity_multiplier": activity_multiplier,
     }
 
 
 # ============================================================
-# OPTIONAL EXCEL INTEGRATION
+# UPDATE EXCEL CALCULATOR
 # ============================================================
 
-def update_calculator_copy(client_data, macros):
-    """
-    Updates the Bot Calculator sheet with the client's data.
-
-    This does NOT control the calculations used by the bot.
-    The Python calculation above is the source of truth.
-
-    The spreadsheet is maintained as a record/calculator copy.
-    """
+def update_calculator(
+    client_data,
+    macros
+):
 
     try:
 
-        wb = load_workbook(
+        workbook = load_workbook(
             CALCULATOR_FILE
         )
 
-        if "Bot Calculator" not in wb.sheetnames:
-            ws = wb.create_sheet(
+        if "Bot Calculator" in workbook.sheetnames:
+
+            sheet = workbook[
+                "Bot Calculator"
+            ]
+
+        else:
+
+            sheet = workbook.create_sheet(
                 "Bot Calculator",
                 0
             )
-        else:
-            ws = wb["Bot Calculator"]
 
-        ws["B3"] = float(client_data["weight"])
-        ws["B4"] = float(
+        sheet["B3"] = float(
+            client_data["weight"]
+        )
+
+        sheet["B4"] = float(
             macros["activity_multiplier"]
         )
 
-        ws["B5"] = macros["calories"]
-        ws["B6"] = macros["protein"]
-        ws["B7"] = macros["fats"]
-        ws["B8"] = macros["carbs"]
+        sheet["B5"] = macros["calories"]
 
-        # Do not overwrite the original calculator.
+        sheet["B6"] = macros["protein"]
+
+        sheet["B7"] = macros["fats"]
+
+        sheet["B8"] = macros["carbs"]
+
         client_name = safe_filename(
             client_data["name"]
         )
 
         output_file = (
-            OUTPUT_DIR /
-            f"{client_name}_Macro_Calculator.xlsx"
+            OUTPUT_DIR
+            / f"{client_name}_Macro_Calculator.xlsx"
         )
 
-        wb.save(output_file)
+        workbook.save(
+            output_file
+        )
 
         return output_file
 
-    except Exception as e:
+    except Exception as error:
 
         logger.exception(
-            "Could not update calculator copy."
+            "Excel calculator error: %s",
+            error
         )
 
         return None
 
 
 # ============================================================
-# WORKOUT DOCUMENT
+# GENERATE WORKOUT DOCUMENT
 # ============================================================
 
-def generate_workout_docx(client_data):
-    """
-    Generates personalized workout document.
-    """
+def generate_workout_docx(
+    client_data
+):
 
     template = DocxTemplate(
         str(WORKOUT_TEMPLATE)
     )
 
     context = {
+
         "name": client_data["name"],
+
         "age": client_data["age"],
+
         "gender": client_data["gender"],
+
         "height": client_data["height"],
+
         "weight": client_data["weight"],
+
         "goal": client_data["goal"],
+
         "experience": client_data["experience"],
+
         "equipment": client_data["equipment"],
+
         "obstacle": client_data["obstacle"],
+
         "injuries": client_data["injuries"],
-        "training_preference": client_data[
-            "training_preference"
-        ],
+
+        "training_preference":
+            client_data[
+                "training_preference"
+            ],
     }
 
-    template.render(context)
+    template.render(
+        context
+    )
 
     client_name = safe_filename(
         client_data["name"]
     )
 
     output_file = (
-        OUTPUT_DIR /
-        f"{client_name}_Workout_Blueprint.docx"
+        OUTPUT_DIR
+        / f"{client_name}_Workout_Blueprint.docx"
     )
 
     template.save(
@@ -377,75 +461,109 @@ def generate_workout_docx(client_data):
 
 
 # ============================================================
-# NUTRITION DOCUMENT
+# GENERATE NUTRITION DOCUMENT
 # ============================================================
 
 def generate_nutrition_docx(
     client_data,
     macros
 ):
-    """
-    Generates personalized nutrition document.
-    """
 
     template = DocxTemplate(
         str(NUTRITION_TEMPLATE)
     )
 
     context = {
-        # Client information
+
+        # CLIENT DATA
         "name": client_data["name"],
+
         "age": client_data["age"],
+
         "gender": client_data["gender"],
+
         "height": client_data["height"],
+
         "weight": client_data["weight"],
+
         "goal": client_data["goal"],
-        "activity_level": client_data[
-            "activity_level"
-        ],
-        "fitness_level": client_data[
-            "fitness_level"
-        ],
-        "obstacle": client_data["obstacle"],
-        "restrictions": client_data[
-            "restrictions"
-        ],
-        "injuries": client_data[
-            "injuries"
-        ],
-        "meals_per_day": client_data[
-            "meals_per_day"
-        ],
 
-        # Nutrition calculations
-        "calories": macros["calories"],
-        "protein": macros["protein"],
-        "carbs": macros["carbs"],
-        "fats": macros["fats"],
-        "water": macros["water"],
-        "weekly_calories": macros[
-            "weekly_calories"
-        ],
+        "activity_level":
+            client_data[
+                "activity_level"
+            ],
 
-        # Extra values
-        "bmr": macros["bmr"],
-        "maintenance_calories": macros[
-            "maintenance_calories"
-        ],
-        "activity_multiplier": macros[
-            "activity_multiplier"
-        ],
+        "fitness_level":
+            client_data[
+                "fitness_level"
+            ],
+
+        "obstacle":
+            client_data[
+                "obstacle"
+            ],
+
+        "restrictions":
+            client_data[
+                "restrictions"
+            ],
+
+        "injuries":
+            client_data[
+                "injuries"
+            ],
+
+        "meals_per_day":
+            client_data[
+                "meals_per_day"
+            ],
+
+        # MACROS
+        "calories":
+            macros["calories"],
+
+        "protein":
+            macros["protein"],
+
+        "carbs":
+            macros["carbs"],
+
+        "fats":
+            macros["fats"],
+
+        "water":
+            macros["water"],
+
+        "weekly_calories":
+            macros[
+                "weekly_calories"
+            ],
+
+        "bmr":
+            macros["bmr"],
+
+        "maintenance_calories":
+            macros[
+                "maintenance_calories"
+            ],
+
+        "activity_multiplier":
+            macros[
+                "activity_multiplier"
+            ],
     }
 
-    template.render(context)
+    template.render(
+        context
+    )
 
     client_name = safe_filename(
         client_data["name"]
     )
 
     output_file = (
-        OUTPUT_DIR /
-        f"{client_name}_Nutrition_Blueprint.docx"
+        OUTPUT_DIR
+        / f"{client_name}_Nutrition_Blueprint.docx"
     )
 
     template.save(
@@ -456,7 +574,7 @@ def generate_nutrition_docx(
 
 
 # ============================================================
-# TELEGRAM /START
+# START COMMAND
 # ============================================================
 
 async def start(
@@ -464,12 +582,12 @@ async def start(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    message = """
+    welcome_message = """
 🏆 SIMON ORIGIN TRANSFORMATION
 
 Welcome!
 
-Send the client's assessment using this format:
+Send the client's assessment using this exact format:
 
 Name, Age, Gender, Height, Weight, Goal, Experience, Equipment, Obstacle, Activity Level, Fitness Level, Restrictions, Injuries, Meals Per Day, Training Preference
 
@@ -477,23 +595,27 @@ Example:
 
 Abebe Bekele, 28, Male, 175, 82, Fat Loss, Beginner, Gym, Consistency, Moderate, Beginner, None, None, 4, Fat Loss
 
-📌 Height = cm
-📌 Weight = kg
+Height = cm
+Weight = kg
 
-The bot will automatically generate:
+The bot will generate:
 
-📄 Personalized Workout Blueprint
-📄 Personalized Nutrition Blueprint
-📊 Calorie & Macro Calculation
+🏋️ Personalized Workout Blueprint
+🥗 Personalized Nutrition Blueprint
+🔥 Calories
+🥩 Protein
+🍚 Carbs
+🥑 Fats
+💧 Water
 """
 
     await update.message.reply_text(
-        message
+        welcome_message
     )
 
 
 # ============================================================
-# ASSESSMENT HANDLER
+# HANDLE CLIENT ASSESSMENT
 # ============================================================
 
 async def handle_assessment(
@@ -502,6 +624,7 @@ async def handle_assessment(
 ):
 
     if not update.message:
+
         return
 
     text = update.message.text.strip()
@@ -509,23 +632,24 @@ async def handle_assessment(
     try:
 
         # ----------------------------------------------------
-        # Split assessment
+        # SPLIT CLIENT DATA
         # ----------------------------------------------------
 
         parts = [
-            p.strip()
-            for p in text.split(",")
+            part.strip()
+            for part in text.split(",")
         ]
 
+        # We require 15 fields
         if len(parts) != 15:
 
             await update.message.reply_text(
                 f"""
-❌ I couldn't process the assessment.
+❌ Assessment format error.
 
-I received {len(parts)} fields, but I need exactly 15.
+I received {len(parts)} fields.
 
-Please use:
+I need exactly 15 fields:
 
 Name, Age, Gender, Height, Weight, Goal, Experience, Equipment, Obstacle, Activity Level, Fitness Level, Restrictions, Injuries, Meals Per Day, Training Preference
 """
@@ -534,7 +658,7 @@ Name, Age, Gender, Height, Weight, Goal, Experience, Equipment, Obstacle, Activi
             return
 
         # ----------------------------------------------------
-        # Client data
+        # CREATE CLIENT DATA
         # ----------------------------------------------------
 
         client_data = {
@@ -571,7 +695,7 @@ Name, Age, Gender, Height, Weight, Goal, Experience, Equipment, Obstacle, Activi
         }
 
         # ----------------------------------------------------
-        # Validate numeric values
+        # VALIDATE NUMBERS
         # ----------------------------------------------------
 
         parse_number(
@@ -590,23 +714,24 @@ Name, Age, Gender, Height, Weight, Goal, Experience, Equipment, Obstacle, Activi
         )
 
         # ----------------------------------------------------
-        # Processing message
+        # PROCESSING MESSAGE
         # ----------------------------------------------------
 
-        processing_message = await update.message.reply_text(
+        processing = await update.message.reply_text(
             f"""
-⏳ Processing assessment for:
+⏳ PROCESSING ASSESSMENT
 
+Client:
 {client_data["name"]}
 
-Calculating nutrition targets...
+Calculating nutrition...
 Creating workout blueprint...
 Creating nutrition blueprint...
 """
         )
 
         # ----------------------------------------------------
-        # Calculate macros
+        # CALCULATE MACROS
         # ----------------------------------------------------
 
         macros = calculate_macros(
@@ -614,18 +739,22 @@ Creating nutrition blueprint...
         )
 
         logger.info(
-            "Macros calculated for %s: %s",
+            "Calculated macros for %s: %s",
             client_data["name"],
             macros
         )
 
         # ----------------------------------------------------
-        # Generate documents
+        # GENERATE WORKOUT
         # ----------------------------------------------------
 
         workout_file = generate_workout_docx(
             client_data
         )
+
+        # ----------------------------------------------------
+        # GENERATE NUTRITION
+        # ----------------------------------------------------
 
         nutrition_file = generate_nutrition_docx(
             client_data,
@@ -633,212 +762,28 @@ Creating nutrition blueprint...
         )
 
         # ----------------------------------------------------
-        # Optional Excel record
+        # CREATE EXCEL RECORD
         # ----------------------------------------------------
 
-        calculator_file = (
-            update_calculator_copy(
-                client_data,
-                macros
-            )
+        calculator_file = update_calculator(
+            client_data,
+            macros
         )
 
         # ----------------------------------------------------
-        # Send workout
+        # SEND WORKOUT
         # ----------------------------------------------------
 
         with open(
             workout_file,
             "rb"
-        ) as document:
+        ) as file:
 
             await update.message.reply_document(
-                document=document,
+
+                document=file,
+
                 filename=workout_file.name,
+
                 caption=(
-                    "🏋️ Your Personalized "
-                    "30-Day Workout Blueprint"
-                ),
-            )
-
-        # ----------------------------------------------------
-        # Send nutrition
-        # ----------------------------------------------------
-
-        with open(
-            nutrition_file,
-            "rb"
-        ) as document:
-
-            await update.message.reply_document(
-                document=document,
-                filename=nutrition_file.name,
-                caption=(
-                    "🥗 Your Personalized "
-                    "30-Day Nutrition Blueprint"
-                ),
-            )
-
-        # ----------------------------------------------------
-        # Send macro summary
-        # ----------------------------------------------------
-
-        await update.message.reply_text(
-            f"""
-✅ BLUEPRINTS COMPLETED
-
-👤 Client: {client_data["name"]}
-
-🔥 Daily Calories:
-{macros["calories"]} kcal
-
-🥩 Protein:
-{macros["protein"]} g
-
-🍚 Carbohydrates:
-{macros["carbs"]} g
-
-🥑 Fat:
-{macros["fats"]} g
-
-💧 Water:
-{macros["water"]} L
-
-📊 Weekly Calories:
-{macros["weekly_calories"]:,} kcal
-
-The personalized workout and nutrition documents have been sent above.
-"""
-        )
-
-        # ----------------------------------------------------
-        # Delete temporary generated files
-        # ----------------------------------------------------
-
-        try:
-
-            if workout_file.exists():
-                workout_file.unlink()
-
-            if nutrition_file.exists():
-                nutrition_file.unlink()
-
-            if calculator_file and calculator_file.exists():
-                calculator_file.unlink()
-
-        except Exception:
-
-            logger.exception(
-                "Could not clean generated files."
-            )
-
-        # ----------------------------------------------------
-        # Delete processing message
-        # ----------------------------------------------------
-
-        try:
-
-            await processing_message.delete()
-
-        except Exception:
-
-            pass
-
-    except Exception as e:
-
-        logger.exception(
-            "Assessment processing failed."
-        )
-
-        await update.message.reply_text(
-            f"""
-❌ ERROR PROCESSING ASSESSMENT
-
-The assessment could not be completed.
-
-Error:
-{str(e)}
-
-Please check the assessment format and try again.
-"""
-        )
-
-
-# ============================================================
-# ERROR HANDLER
-# ============================================================
-
-async def error_handler(
-    update: object,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    logger.exception(
-        "Telegram bot error:",
-        exc_info=context.error
-    )
-
-
-# ============================================================
-# MAIN
-# ============================================================
-
-def main():
-
-    logger.info(
-        "Checking required files..."
-    )
-
-    check_required_files()
-
-    logger.info(
-        "All required files found."
-    )
-
-    logger.info(
-        "Starting Simon Origin Transformation Bot..."
-    )
-
-    app = (
-        Application
-        .builder()
-        .token(BOT_TOKEN)
-        .build()
-    )
-
-    # Commands
-    app.add_handler(
-        CommandHandler(
-            "start",
-            start
-        )
-    )
-
-    # Assessment messages
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            handle_assessment
-        )
-    )
-
-    # Error handling
-    app.add_error_handler(
-        error_handler
-    )
-
-    logger.info(
-        "Bot is running..."
-    )
-
-    app.run_polling(
-        allowed_updates=Update.ALL_TYPES
-    )
-
-
-# ============================================================
-# START BOT
-# ============================================================
-
-if __name__ == "__main__":
-    main()
+                    "🏋️
