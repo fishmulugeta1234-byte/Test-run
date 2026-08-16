@@ -89,8 +89,13 @@ def number(value, field):
         return float(
             str(value)
             .replace(",", "")
+            .replace("kg", "")
+            .replace("KG", "")
+            .replace("cm", "")
+            .replace("CM", "")
             .strip()
         )
+
     except (TypeError, ValueError):
         raise ValueError(
             f"{field} must be a number."
@@ -387,7 +392,7 @@ def build_context(
 
     context.update(macros)
 
-    # Additional common placeholder names
+    # Additional placeholder names
     context["client_name"] = client["name"]
 
     context["weight_kg"] = client["weight"]
@@ -505,21 +510,26 @@ async def start(
     message = (
         "SIMON ORIGIN TRANSFORMATION\n\n"
 
-        "Send the client assessment in this exact format:\n\n"
+        "Please send the client assessment "
+        "using this structured format:\n\n"
 
-        "Name, Age, Gender, Height, Weight, Goal, "
-        "Experience, Equipment, Obstacle, Activity Level, "
-        "Fitness Level, Restrictions, Injuries, "
-        "Meals Per Day, Training Preference\n\n"
+        "Name: Client Name\n"
+        "Age: 28\n"
+        "Gender: Male\n"
+        "Height: 175 cm\n"
+        "Weight: 82 kg\n"
+        "Goal: Fat Loss\n"
+        "Experience: Beginner\n"
+        "Equipment: Gym\n"
+        "Obstacle: Consistency\n"
+        "Activity Level: Moderate\n"
+        "Fitness Level: Beginner\n"
+        "Restrictions: None\n"
+        "Injuries: None\n"
+        "Meals Per Day: 4\n"
+        "Training Preference: Fat Loss\n\n"
 
-        "Example:\n\n"
-
-        "Abebe Bekele, 28, Male, 175, 82, Fat Loss, "
-        "Beginner, Gym, Consistency, Moderate, Beginner, "
-        "None, None, 4, Fat Loss\n\n"
-
-        "Height = cm\n"
-        "Weight = kg"
+        "Send all 15 lines together in ONE message."
     )
 
     await update.message.reply_text(
@@ -528,7 +538,186 @@ async def start(
 
 
 # ============================================================
-# HANDLE ASSESSMENT
+# STRUCTURED ASSESSMENT PARSER
+# ============================================================
+
+def parse_structured_assessment(text):
+
+    raw_data = {}
+
+    # --------------------------------------------------------
+    # READ EACH LINE
+    # --------------------------------------------------------
+
+    for line in text.splitlines():
+
+        line = line.strip()
+
+        if not line:
+            continue
+
+        if ":" not in line:
+            continue
+
+        key, value = line.split(
+            ":",
+            1
+        )
+
+        key = key.strip().lower()
+
+        value = value.strip()
+
+        raw_data[key] = value
+
+    # --------------------------------------------------------
+    # FIELD NAME ALIASES
+    # --------------------------------------------------------
+
+    aliases = {
+
+        "name": [
+            "name",
+            "client name",
+            "full name"
+        ],
+
+        "age": [
+            "age"
+        ],
+
+        "gender": [
+            "gender",
+            "sex"
+        ],
+
+        "height": [
+            "height",
+            "height cm",
+            "height(cm)"
+        ],
+
+        "weight": [
+            "weight",
+            "weight kg",
+            "weight(kg)"
+        ],
+
+        "goal": [
+            "goal",
+            "main goal",
+            "primary goal"
+        ],
+
+        "experience": [
+            "experience",
+            "training experience"
+        ],
+
+        "equipment": [
+            "equipment",
+            "available equipment"
+        ],
+
+        "obstacle": [
+            "obstacle",
+            "biggest obstacle",
+            "main obstacle"
+        ],
+
+        "activity_level": [
+            "activity level",
+            "activity_level",
+            "activity"
+        ],
+
+        "fitness_level": [
+            "fitness level",
+            "fitness_level"
+        ],
+
+        "restrictions": [
+            "restrictions",
+            "dietary restrictions",
+            "diet restrictions"
+        ],
+
+        "injuries": [
+            "injuries",
+            "injury",
+            "physical limitations"
+        ],
+
+        "meals_per_day": [
+            "meals per day",
+            "meals_per_day",
+            "meals"
+        ],
+
+        "training_preference": [
+            "training preference",
+            "training_preference",
+            "training preferences"
+        ],
+    }
+
+    result = {}
+
+    # --------------------------------------------------------
+    # FIND VALUES
+    # --------------------------------------------------------
+
+    for field, possible_keys in aliases.items():
+
+        found = None
+
+        for key in possible_keys:
+
+            if key in raw_data:
+
+                found = raw_data[key]
+
+                break
+
+        result[field] = found
+
+    # --------------------------------------------------------
+    # REQUIRED FIELDS
+    # --------------------------------------------------------
+
+    required = [
+        "name",
+        "age",
+        "gender",
+        "height",
+        "weight",
+        "goal",
+        "experience",
+        "equipment",
+        "obstacle",
+        "activity_level",
+        "fitness_level",
+        "restrictions",
+        "injuries",
+        "meals_per_day",
+        "training_preference",
+    ]
+
+    missing = [
+        field
+        for field in required
+        if not result.get(field)
+    ]
+
+    if missing:
+
+        return None, missing
+
+    return result, []
+
+
+# ============================================================
+# HANDLE CLIENT ASSESSMENT
 # ============================================================
 
 async def handle_assessment(
@@ -547,73 +736,43 @@ async def handle_assessment(
     try:
 
         # ----------------------------------------------------
-        # SPLIT DATA
+        # PARSE STRUCTURED DATA
         # ----------------------------------------------------
 
-        parts = [
-            part.strip()
-            for part in text.split(",")
-        ]
+        client, missing = parse_structured_assessment(
+            text
+        )
 
-        # ----------------------------------------------------
-        # CHECK NUMBER OF FIELDS
-        # ----------------------------------------------------
+        if client is None:
 
-        if len(parts) != 15:
+            missing_text = "\n".join(
+                f"- {field.replace('_', ' ').title()}"
+                for field in missing
+            )
 
             await update.message.reply_text(
-                "Format error.\n\n"
-
-                f"I received {len(parts)} fields, "
-                "but I need exactly 15.\n\n"
-
-                "Use:\n"
-
-                "Name, Age, Gender, Height, Weight, Goal, "
-                "Experience, Equipment, Obstacle, "
-                "Activity Level, Fitness Level, "
-                "Restrictions, Injuries, Meals Per Day, "
-                "Training Preference"
+                "Assessment incomplete.\n\n"
+                "Missing fields:\n"
+                f"{missing_text}\n\n"
+                "Please send the assessment like this:\n\n"
+                "Name: Client Name\n"
+                "Age: 28\n"
+                "Gender: Male\n"
+                "Height: 175 cm\n"
+                "Weight: 82 kg\n"
+                "Goal: Fat Loss\n"
+                "Experience: Beginner\n"
+                "Equipment: Gym\n"
+                "Obstacle: Consistency\n"
+                "Activity Level: Moderate\n"
+                "Fitness Level: Beginner\n"
+                "Restrictions: None\n"
+                "Injuries: None\n"
+                "Meals Per Day: 4\n"
+                "Training Preference: Fat Loss"
             )
 
             return
-
-        # ----------------------------------------------------
-        # CLIENT DATA
-        # ----------------------------------------------------
-
-        client = {
-
-            "name": parts[0],
-
-            "age": parts[1],
-
-            "gender": parts[2],
-
-            "height": parts[3],
-
-            "weight": parts[4],
-
-            "goal": parts[5],
-
-            "experience": parts[6],
-
-            "equipment": parts[7],
-
-            "obstacle": parts[8],
-
-            "activity_level": parts[9],
-
-            "fitness_level": parts[10],
-
-            "restrictions": parts[11],
-
-            "injuries": parts[12],
-
-            "meals_per_day": parts[13],
-
-            "training_preference": parts[14],
-        }
 
         # ----------------------------------------------------
         # VALIDATE NUMBERS
@@ -638,12 +797,11 @@ async def handle_assessment(
         # PROCESSING MESSAGE
         # ----------------------------------------------------
 
-        processing = (
-            await update.message.reply_text(
-                f"Processing {client['name']}...\n\n"
-                "Calculating nutrition and "
-                "creating your personalized documents."
-            )
+        processing = await update.message.reply_text(
+            f"Processing {client['name']}...\n\n"
+            "Calculating nutrition targets...\n"
+            "Creating workout blueprint...\n"
+            "Creating nutrition blueprint..."
         )
 
         # ----------------------------------------------------
@@ -682,11 +840,9 @@ async def handle_assessment(
         # CREATE EXCEL COPY
         # ----------------------------------------------------
 
-        calculator_file = (
-            create_calculator_copy(
-                client,
-                macros
-            )
+        calculator_file = create_calculator_copy(
+            client,
+            macros
         )
 
         # ----------------------------------------------------
@@ -699,11 +855,8 @@ async def handle_assessment(
         ) as file:
 
             await update.message.reply_document(
-
                 document=file,
-
                 filename=workout_file.name,
-
                 caption=(
                     "Personalized "
                     "30-Day Workout Blueprint"
@@ -720,11 +873,8 @@ async def handle_assessment(
         ) as file:
 
             await update.message.reply_document(
-
                 document=file,
-
                 filename=nutrition_file.name,
-
                 caption=(
                     "Personalized "
                     "30-Day Nutrition Blueprint"
@@ -736,23 +886,12 @@ async def handle_assessment(
         # ----------------------------------------------------
 
         await update.message.reply_text(
-
             f"Completed for {client['name']}.\n\n"
-
-            f"Calories: "
-            f"{macros['calories']} kcal/day\n"
-
-            f"Protein: "
-            f"{macros['protein']} g/day\n"
-
-            f"Carbs: "
-            f"{macros['carbs']} g/day\n"
-
-            f"Fats: "
-            f"{macros['fats']} g/day\n"
-
-            f"Water: "
-            f"{macros['water']} L/day"
+            f"Calories: {macros['calories']} kcal/day\n"
+            f"Protein: {macros['protein']} g/day\n"
+            f"Carbs: {macros['carbs']} g/day\n"
+            f"Fats: {macros['fats']} g/day\n"
+            f"Water: {macros['water']} L/day"
         )
 
         # ----------------------------------------------------
@@ -768,7 +907,6 @@ async def handle_assessment(
             if file and file.exists():
 
                 try:
-
                     file.unlink()
 
                 except OSError:
@@ -797,18 +935,15 @@ async def handle_assessment(
         )
 
         await update.message.reply_text(
-
             "ERROR PROCESSING ASSESSMENT\n\n"
-
             f"{error}\n\n"
-
             "Please check the assessment format "
             "and try again."
         )
 
 
 # ============================================================
-# ERROR HANDLER
+# TELEGRAM ERROR HANDLER
 # ============================================================
 
 async def error_handler(
@@ -830,7 +965,7 @@ async def error_handler(
 def main():
 
     # --------------------------------------------------------
-    # CHECK BOT TOKEN
+    # BOT TOKEN
     # --------------------------------------------------------
 
     if not BOT_TOKEN:
@@ -855,7 +990,7 @@ def main():
     )
 
     # --------------------------------------------------------
-    # START BOT
+    # START APPLICATION
     # --------------------------------------------------------
 
     logger.info(
@@ -877,7 +1012,7 @@ def main():
         )
     )
 
-    # Client assessment
+    # Structured assessment
     app.add_handler(
         MessageHandler(
             filters.TEXT & ~filters.COMMAND,
