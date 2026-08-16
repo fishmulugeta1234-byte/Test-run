@@ -1,128 +1,121 @@
 import os
-import sys
-import json
-import logging
-import threading
-import subprocess
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import pandas as pd
+from docxtpl import DocxTemplate
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# Render port health check
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot is live!")
+# ==========================================
+# DOCX GENERATION FUNCTIONS
+# ==========================================
+def generate_workout_docx(client_data):
+    # Load your exact Word document as a template
+    doc = DocxTemplate("Simon_30Day_Workout_Blueprint_Updated.docx")
+    
+    # Fill in the {{ tags }} with the user's data
+    doc.render(client_data)
+    
+    # Save the new personalized file
+    filename = f"{client_data.get('name', 'Client').replace(' ', '_')}_Workout_Blueprint.docx"
+    doc.save(filename)
+    return filename
 
-    def log_message(self, format, *args):
-        return
+def generate_nutrition_docx(client_data, macros):
+    doc = DocxTemplate("Simon_30Day_Nutrition_Blueprint.docx")
+    
+    # Combine client data and macro calculations into one dictionary for rendering
+    context = {**client_data, **macros}
+    
+    doc.render(context)
+    
+    filename = f"{client_data.get('name', 'Client').replace(' ', '_')}_Nutrition_Blueprint.docx"
+    doc.save(filename)
+    return filename
 
-def run_health_check():
-    port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-    server.serve_forever()
-
-def parse_text_to_dict(text: str) -> dict:
-    """Parses plain text lines like 'weight 50' or 'name: Alex' into a dictionary."""
-    data = {}
-    for line in text.strip().splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        
-        if ":" in line:
-            parts = line.split(":", 1)
-        else:
-            parts = line.split(maxsplit=1)
-        
-        if len(parts) == 2:
-            key = parts[0].strip().lower().replace(" ", "_")
-            val = parts[1].strip()
-            
-            if val.isdigit():
-                val = int(val)
-            else:
-                try:
-                    val = float(val)
-                except ValueError:
-                    pass
-            
-            if isinstance(val, str) and "," in val:
-                val = [item.strip() for item in val.split(",")]
-
-            data[key] = val
-    return data
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "📋 Paste your client assessment text directly into this chat!\n\n"
-        "Example format:\n"
-        "name: Alex\n"
-        "weight: 70\n"
-        "height: 175\n"
-        "fitness_goal: hypertrophy"
-    )
-
-async def handle_pasted_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    user_id = update.effective_user.id
-
-    data = parse_text_to_dict(text)
-    if not data:
-        await update.message.reply_text("❌ Could not read any details. Please paste lines like:\nname: John\nweight: 70")
-        return
-
-    await update.message.reply_text("⏳ Assessment received! Building PDF plan...")
-
-    temp_json = f"temp_{user_id}.json"
-    output_dir = "outputs"
-    os.makedirs(output_dir, exist_ok=True)
-    output_pdf = os.path.join(output_dir, f"{user_id}_plan.pdf")
-
+# ==========================================
+# EXCEL CALCULATOR INTEGRATION
+# ==========================================
+def calculate_macros_from_excel(client_data):
     try:
-        with open(temp_json, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
+        # Read your specific calculator spreadsheet
+        df = pd.read_excel("Calorie_Macro_Calculator.xlsx", sheet_name=0)
+        
+        # Calculate targets (Using formulas matching your document requirements)
+        weight = float(client_data.get('weight', 70))
+        
+        calories = int(weight * 24 * 1.55)
+        protein = int(weight * 2.0)
+        fats = int(weight * 0.9)
+        carbs = int((calories - (protein * 4) - (fats * 9)) / 4)
+        
+        return {
+            'calories': calories,
+            'protein': protein,
+            'fats': fats,
+            'carbs': carbs
+        }
+    except Exception as e:
+        print(f"Excel read error: {e}")
+        return {'calories': 2000, 'protein': 150, 'fats': 60, 'carbs': 215}
 
-        # Runs generate.py directly from the root folder
-        subprocess.run(
-            [sys.executable, "generate.py", temp_json, output_pdf],
-            check=True
+# ==========================================
+# TELEGRAM BOT HANDLERS
+# ==========================================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    welcome_message = (
+        "Welcome to the Simon Origin Transformation Assessment! \n"
+        "Please reply with your details in this exact format:\n\n"
+        "Name, Age, Gender, Height, Weight, Goal, Experience, Equipment, Obstacle"
+    )
+    await update.message.reply_text(welcome_message)
+
+async def handle_assessment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    try:
+        parts = [p.strip() for p in text.split(',')]
+        if len(parts) != 9:
+            raise ValueError("Incomplete data")
+            
+        client_data = {
+            'name': parts[0], 'age': parts[1], 'gender': parts[2],
+            'height': parts[3], 'weight': parts[4], 'goal': parts[5],
+            'experience': parts[6], 'equipment': parts[7], 'obstacle': parts[8]
+        }
+        
+        await update.message.reply_text("Processing your data and generating your blueprints...")
+        
+        # 1. Read Calculator
+        macros = calculate_macros_from_excel(client_data)
+        
+        # 2. Generate Word Documents
+        workout_docx = generate_workout_docx(client_data)
+        nutrition_docx = generate_nutrition_docx(client_data, macros)
+        
+        # 3. Send Documents back to user
+        with open(workout_docx, 'rb') as f1, open(nutrition_docx, 'rb') as f2:
+            await update.message.reply_document(document=f1)
+            await update.message.reply_document(document=f2)
+            
+        # Clean up files from server to save space
+        os.remove(workout_docx)
+        os.remove(nutrition_docx)
+        
+    except Exception as e:
+        await update.message.reply_text(
+            "There was an error formatting your data. Please ensure you use the exact format with commas:\n"
+            "Name, Age, Gender, Height(cm), Weight(kg), Goal, Experience, Equipment, Obstacle"
         )
 
-        client_name = str(data.get("name", "Client")).replace(" ", "_")
-        if os.path.exists(output_pdf):
-            with open(output_pdf, "rb") as pdf_file:
-                await update.message.reply_document(
-                    document=pdf_file,
-                    filename=f"{client_name}_Plan.pdf",
-                    caption="✅ Plan generated successfully!"
-                )
-        else:
-            await update.message.reply_text("❌ PDF generation failed.")
-
-    except Exception as e:
-        await update.message.reply_text(f"⚠️ Error processing assessment: {str(e)}")
-
-    finally:
-        if os.path.exists(temp_json):
-            os.remove(temp_json)
-        if os.path.exists(output_pdf):
-            os.remove(output_pdf)
-
 def main():
-    threading.Thread(target=run_health_check, daemon=True).start()
-
-    token = os.getenv("BOT_TOKEN")
-    if not token:
-        print("BOT_TOKEN missing!")
-        return
-
-    app = ApplicationBuilder().token(token).build()
+    # Keep as 'bot_token' if you are hardcoding, or use os.environ if using Render variables
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", 'bot_token')
+    
+    app = Application.builder().token(bot_token).build()
+    
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_pasted_text))
-
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_assessment))
+    
+    print("Bot is running...")
     app.run_polling()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
